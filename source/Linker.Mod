@@ -1,6 +1,6 @@
 MODULE Linker;	(* AUTHOR "negelef"; PURPOSE "Object File Linker"; *)
 
-IMPORT Commands, Options, Diagnostics, Files, GenericLinker, ObjectFile, BitSets, Strings, Streams;
+IMPORT Commands, Options, Diagnostics, Files, GenericLinker, ObjectFile, BitSets, Strings, Streams, Unix;
 
 TYPE
 	ExportName = ARRAY 128 OF CHAR;
@@ -983,6 +983,7 @@ BEGIN
 	NEW (options);
 	options.Add('p',"platform", Options.String);
 	options.Add (0X, "silent", Options.Flag);
+	options.Add (0X, "executable", Options.Flag);
 	options.Add ('a', "useAll", Options.Flag);
 	options.Add ('s', "strict", Options.Flag);
 	options.Add (0X, "path", Options.String); options.Add (0X, "extension", Options.String);
@@ -1061,6 +1062,14 @@ BEGIN
 	IF ~linker.error & CheckExports(code.exportInfo, context.error) THEN
 		IF (code.displacement # 0) & (linker.log # NIL) THEN linker.log.String("code displacement 0"); linker.log.Hex(code.displacement,-8); linker.log.String("H"); linker.log.Ln END;
 		WriteOutputFile (code, codeFileName, linker, codeFileFormat);
+		IF options.GetFlag("executable") THEN
+			(* Unix files are registered by rename, so this also works when
+			   replacing the currently running executable. Set mode 0755. *)
+			IF Unix.chmod(ADDRESS OF codeFileName, {0, 2, 3, 5, 6, 7, 8}) # 0 THEN
+				context.error.String("Could not make executable: "); context.error.String(codeFileName); context.error.Ln;
+				context.result := Commands.CommandError; RETURN;
+			END;
+		END;
 		IF data # code THEN
 			IF (data.displacement # 0) & (linker.log # NIL) THEN linker.log.String("data displacement 0"); linker.log.Hex(data.displacement,-8); linker.log.String("H"); linker.log.Ln END;
 			WriteOutputFile (data, dataFileName, linker, dataFileFormat);
@@ -1109,4 +1118,3 @@ Linker.Link --fileName=a.out --fileFormat=ELF --displacement=08048000H Test ~
 Linker.Link --fileName=a.out --fileFormat=MACHO --displacement=000010E8H Test ~
 
 System.Free Linker ~
-

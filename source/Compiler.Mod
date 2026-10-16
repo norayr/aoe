@@ -436,7 +436,7 @@ TYPE
 			IF options.GetFlag("cellsAreObjects") THEN INCL(compilerOptions.flags, CellsAreObjects) END;
 			IF ~options.GetString("rootPath", compilerOptions.rootPath) THEN compilerOptions.rootPath := "" END;
 			IF ~options.GetString("srcPath", compilerOptions.srcPath) THEN compilerOptions.srcPath := "" END;
-			IF ~options.GetString("destPath", compilerOptions.destPath) THEN compilerOptions.destPath := "" END;
+			IF ~options.GetString("destPath", compilerOptions.destPath) THEN compilerOptions.destPath := "obj/amd64/" END;
 			IF compilerOptions.backend # NIL THEN compilerOptions.backend.GetOptions (options) END;
 			IF compilerOptions.symbolFile # NIL THEN compilerOptions.symbolFile.GetOptions(options) END;
 			IF compilerOptions.objectFile # NIL THEN compilerOptions.objectFile.GetOptions(options) END;
@@ -465,7 +465,7 @@ TYPE
 		filename, path, file: Files.FileName;
 		error: BOOLEAN;
 		diagnostics: Diagnostics.Diagnostics;
-		time: SIGNED32; reader: Streams.Reader;
+		time: SIGNED32; reader: Streams.Reader; directoryResult: INTEGER;
 		importCache: SyntaxTree.ModuleScope;
 		options: CompilerOptions;
 		replacement: SemanticChecker.Replacement;
@@ -475,6 +475,12 @@ TYPE
 
 		diagnostics := Basic.GetDiagnostics(context.error);
 		IF GetOptions(context.arg,context.error,diagnostics,options) THEN
+			(* The default output belongs to the caller's project, not the installation.
+			   Explicit --destPath values retain upstream behavior. *)
+			IF options.destPath = "obj/amd64/" THEN
+				Files.CreateDirectory("obj", directoryResult);
+				Files.CreateDirectory("obj/amd64", directoryResult);
+			END;
 
 			time := Kernel.GetTicks();
 			WHILE Basic.GetStringParameter(context.arg,filename) & ~error DO
@@ -512,6 +518,7 @@ TYPE
 			END;
 		ELSE
 			context.result := Commands.CommandParseError;
+			RETURN;
 		END;
 		IF error THEN context.result := Commands.CommandError ELSE context.result := Commands.Ok END;
 

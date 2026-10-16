@@ -1,0 +1,4 @@
+/bin/amd64/aoe binary
+/obj/amd64/*.GofUu binary
+# Preserve compiler-generated symbol files, including CRLF and trailing spaces.
+/obj/amd64/*.SymUu -text whitespace=-blank-at-eol,-blank-at-eof

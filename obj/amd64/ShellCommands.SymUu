@@ -1,0 +1,126 @@
+MODULE ShellCommands;
+	IMPORT Commands, Modules, Streams, Strings, Files, Pipes, StdIO;
+CONST 
+	MaxLine = 4096; 
+	MaxExpansion = 32; 
+	End = 0; 
+	Word = 1; 
+	Bar = 2; 
+	Input = 3; 
+	Output = 4; 
+	Append = 5; 
+	Background = 6; 
+	Bad = 7; 
+TYPE 
+	Line = ARRAY MaxLine OF CHAR; 
+
+	Session* = OBJECT 
+	VAR 
+		quit*: BOOLEAN; 
+		depth*: INTEGER; 
+		background: BOOLEAN; 
+	END Session; 
+
+	AliasEntry = POINTER TO RECORD 
+		next: AliasEntry; 
+		name: Modules.Name; 
+		value: Line; 
+	END; 
+
+	Sink = OBJECT {EXCLUSIVE} 
+	VAR 
+		target: Streams.Writer; 
+
+		PROCEDURE ^ Send(CONST data: ARRAY OF CHAR; ofs, len: SIZE; propagate: BOOLEAN; VAR res: INTEGER); 
+	END Sink; 
+
+	SharedWriter = OBJECT (Streams.Writer)
+	VAR 
+		sink: Sink; 
+
+		PROCEDURE ^  & Init(sink: Sink); 
+	END SharedWriter; 
+
+	Stage = POINTER TO RECORD 
+		next: Stage; 
+		name, args: Line; 
+		input, output: Files.FileName; 
+		append: BOOLEAN; 
+		context: Commands.Context; 
+		source, destination: Pipes.Pipe; 
+	END; 
+
+	Worker = OBJECT {EXCLUSIVE} 
+	VAR 
+		next: Worker; 
+		stage: Stage; 
+		done, entered, flushed: BOOLEAN; 
+
+		PROCEDURE ^  & Init(stage: Stage); 
+		PROCEDURE ^ Join(): INTEGER; 
+	BEGIN{ACTIVE, SAFE} 
+	END Worker; 
+
+	Pipeline = OBJECT {EXCLUSIVE} 
+	VAR 
+		head: Stage; 
+		workers: Worker; 
+		done, entered, background: BOOLEAN; 
+		result: INTEGER; 
+		context: Commands.Context; 
+		stage: Stage; 
+		worker: Worker; 
+		res: INTEGER; 
+
+		PROCEDURE ^  & Init(context: Commands.Context; head: Stage; background: BOOLEAN); 
+		PROCEDURE ^ Join(): INTEGER; 
+	BEGIN{ACTIVE, SAFE} 
+	END Pipeline; 
+
+	Job = POINTER TO RECORD 
+		next: Job; 
+		pipeline: Pipeline; 
+	END; 
+VAR 
+	aliases: AliasEntry; 
+	stdout, stderr: Sink; 
+	jobs: Job; 
+	aliasFile: Files.FileName; 
+	initialized: BOOLEAN; 
+
+	PROCEDURE ^ Error(context: Commands.Context; CONST message: ARRAY OF CHAR); 
+	PROCEDURE ^ NewSession*(caller: OBJECT): Session; 
+	PROCEDURE ^ GetSink(target: Streams.Writer): Sink; 
+	PROCEDURE ^ Writer(target: Streams.Writer): Streams.Writer; 
+	PROCEDURE ^ Context*(outer: Commands.Context; arg: Streams.Reader; caller: OBJECT): Commands.Context; 
+	PROCEDURE ^ Tail(reader: Streams.Reader; VAR text: ARRAY OF CHAR): BOOLEAN; 
+	PROCEDURE ^ Token(CONST line: ARRAY OF CHAR; VAR pos, start, end: SIZE): INTEGER; 
+	PROCEDURE ^ Value(CONST line: ARRAY OF CHAR; start, end: SIZE; VAR value: ARRAY OF CHAR): BOOLEAN; 
+	PROCEDURE ^ Argument(VAR args: Line; CONST line: ARRAY OF CHAR; start, end: SIZE): BOOLEAN; 
+	PROCEDURE ^ FindAlias(CONST name: ARRAY OF CHAR; VAR value: Line): BOOLEAN; 
+	PROCEDURE ^ Snapshot(): AliasEntry; 
+	PROCEDURE ^ AliasNames*(VAR reader: Streams.StringReader); 
+	PROCEDURE ^ SetAlias(CONST name, value: ARRAY OF CHAR); 
+	PROCEDURE ^ Alias*(context: Commands.Context); 
+	PROCEDURE ^ Unalias*(context: Commands.Context); 
+	PROCEDURE ^ LocalPath(context: Commands.Context; CONST name: ARRAY OF CHAR; VAR path: Files.FileName): BOOLEAN; 
+	PROCEDURE ^ ScriptLine(context: Commands.Context; reader: Streams.Reader; VAR line: Line): BOOLEAN; 
+	PROCEDURE ^ CurrentAliasFile(VAR filename: Files.FileName); 
+	PROCEDURE ^ RememberAliasFile(CONST filename: Files.FileName); 
+	PROCEDURE ^ AliasFilename(context: Commands.Context; VAR filename: Files.FileName): BOOLEAN; 
+	PROCEDURE ^ LoadAliases*(context: Commands.Context); 
+	PROCEDURE ^ SaveAliases*(context: Commands.Context); 
+	PROCEDURE ^ Initialize*(context: Commands.Context); 
+	PROCEDURE ^ Expand(context: Commands.Context; stage: Stage): BOOLEAN; 
+	PROCEDURE ^ Parse(context: Commands.Context; CONST line: Line; VAR head: Stage; VAR background: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ Prepare(context: Commands.Context; head: Stage; background: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ RememberJob(pipeline: Pipeline); 
+	PROCEDURE ^ TakeJobs(): Job; 
+	PROCEDURE ^ Wait*(context: Commands.Context); 
+	PROCEDURE ^ Execute*(context: Commands.Context); 
+	PROCEDURE ^ SourceFile*(context: Commands.Context; CONST filename: ARRAY OF CHAR); 
+	PROCEDURE ^ Source*(context: Commands.Context); 
+	PROCEDURE ^ Dispatch(context: Commands.Context; CONST name: ARRAY OF CHAR); 
+	PROCEDURE ^ Command*(context: Commands.Context); 
+BEGIN
+END ShellCommands.

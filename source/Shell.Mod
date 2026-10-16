@@ -1,689 +1,415 @@
-MODULE Shell; (** AUTHOR "be"; PURPOSE "Simple command shell" **)
-(**
- * Simple echo-based command shell.
- *
- * History:
- *
- *	16.05.2006	Added command history, backspace key handling, factored out serial port related code into ShellSerials.Mod (staubesv)
- *
- *)
+MODULE Shell; (** Console shell, following polpo's loksh interaction model. *)
 
-IMPORT Modules, Commands, Streams, Pipes, Strings, Files;
+IMPORT SYSTEM, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
 
 CONST
-	(* Notify procedure command codes *)
-	ExitShell* = 1;
-	Clear* = 2;
-
-	Version = "Shell v1.0";
-
-	DefaultAliasFile = "Shell.Alias";
-
-	NestingLevelIndicator = ">";
-
-	MaxLen = 4096;
-	CmdLen = 64;
-	ParamLen = MaxLen;
-	CR = 0DX; LF = 0AX; TAB = 9X;
-	Backspace = 08X;
-	Space = 20X;
-	Delete = 7FX;
-	Escape = 1BX;
-
-	EscapeChar1 = Escape;
-	EscapeChar2 = '[';
-
-	(* Non-ASCII characters *)
-	CursorUp = 0C1X;
-	CursorDown = 0C2X;
-
-	(* symbols *)
-	start = {};
-	inputFile = {0};	 			(* 01H *)
-	pipe = {1};					(* 02H *)
-	outputFile = {2};				(* 04H *)
-	outputFileAppend = {3};		(* 08H *)
-	ampersand = {4};			(* 10H *)
-	whitespace = {5};			(* 20H *)
-	eoln = {6};					(* 40H *)
-	char = {7};					(* 80H *)
-	EndOfParam = pipe + inputFile + outputFile + outputFileAppend + ampersand + eoln;
-
-	(* errors *)
-	ErrFileNotFound = 1;
-	ErrInvalidFilename = 2;
-	ErrAlreadyPiped = 3;
-	ErrPipeAtBeginning = 4;
-	ErrInvalidCommand = 5;
-	ErrEolnExpected = 6;
+	MaxLine = 4096; MaxHist = 64;
+	ESC = 1BX; TAB = 9X; LF = 0AX; CR = 0DX;
 
 TYPE
-	CommandsString = POINTER TO RECORD
-		prev, next: CommandsString;
-		string: ARRAY MaxLen OF CHAR;
+	Line = ARRAY MaxLine OF CHAR;
+	Candidate = POINTER TO RECORD next: Candidate; name: Files.FileName END;
+
+VAR
+	tcgetattr: PROCEDURE {C} (fd: SIGNED32; VAR term: Unix.Termios): SIGNED32;
+	tcsetattr: PROCEDURE {C} (fd, action: SIGNED32; CONST term: Unix.Termios): SIGNED32;
+	saved, editing: Unix.Termios;
+	terminal: BOOLEAN;
+	history: ARRAY MaxHist OF Line;
+	historyCount: INTEGER;
+
+PROCEDURE Restore;
+VAR ignored: SIGNED32;
+BEGIN
+	IF terminal THEN ignored := tcsetattr(0, 0, saved) END;
+END Restore;
+
+PROCEDURE Prefix(CONST prefix, name: ARRAY OF CHAR): BOOLEAN;
+VAR i: SIZE;
+BEGIN
+	i := 0;
+	WHILE (prefix[i] # 0X) & (prefix[i] = name[i]) DO INC(i) END;
+	RETURN prefix[i] = 0X;
+END Prefix;
+
+PROCEDURE Add(VAR list: Candidate; CONST name: ARRAY OF CHAR);
+VAR p, previous, item: Candidate;
+BEGIN
+	previous := NIL; p := list;
+	WHILE (p # NIL) & (p.name < name) DO previous := p; p := p.next END;
+	IF (p # NIL) & (p.name = name) THEN RETURN END;
+	NEW(item); COPY(name, item.name); item.next := p;
+	IF previous = NIL THEN list := item ELSE previous.next := item END;
+END Add;
+
+PROCEDURE CommandNames(CONST module: ARRAY OF CHAR; VAR list: Candidate): BOOLEAN;
+VAR names: CommandInfo.Name;
+BEGIN
+	IF ~CommandInfo.List(module, names) THEN RETURN FALSE END;
+	WHILE names # NIL DO Add(list, names.name); names := names.next END;
+	RETURN TRUE;
+END CommandNames;
+
+PROCEDURE ModuleNames(CONST path: ARRAY OF CHAR; VAR list: Candidate);
+VAR enum: Files.Enumerator; mask, full, dir, name: Files.FileName;
+	flags: SET; time, date: SIGNED32; size: Files.Size; n: SIZE;
+BEGIN
+	Files.JoinPath(path, "*.GofUu", mask);
+	NEW(enum); enum.Open(mask, {});
+	WHILE enum.GetEntry(full, flags, time, date, size) DO
+		Files.SplitPath(full, dir, name); n := Strings.Length(name);
+		IF (n > 6) & ~(Files.Directory IN flags) THEN
+			name[n-6] := 0X; Strings.Append(name, "."); Add(list, name);
+		END;
 	END;
+	enum.Close;
+END ModuleNames;
 
-	CommandHistory = OBJECT
-	VAR
-		first, current: CommandsString;
-
-		PROCEDURE GetNextCommand(VAR cmd : ARRAY OF CHAR);
-		BEGIN
-			IF first = NIL THEN RETURN END;
-			IF current = NIL THEN current := first ELSE current := current.next END;
-			COPY(current.string, cmd);
-		END GetNextCommand;
-
-		PROCEDURE GetPreviousCommand(VAR cmd : ARRAY OF CHAR);
-		BEGIN
-			IF first = NIL THEN RETURN END;
-			IF current = NIL THEN current := first.prev ELSE current := current.prev END;
-			COPY(current.string, cmd);
-		END GetPreviousCommand;
-
-		PROCEDURE AddCommand(CONST cmd : ARRAY OF CHAR);
-		VAR command: CommandsString;
-		BEGIN
-			IF (cmd = "") THEN (* Don't add to history *) RETURN; END;
-			command := first;
-			IF command # NIL THEN
-				WHILE (command.string # cmd) & (command.next # first) DO command := command.next END;
-				IF command.string # cmd THEN command := NIL END
-			END;
-			IF command # NIL THEN
-				IF first = command THEN first := command.next END;
-				command.prev.next := command.next;
-				command.next.prev := command.prev;
-			ELSE
-				NEW (command);
-				COPY (cmd, command.string);
-			END;
-			IF first = NIL THEN
-				first := command; first.next := first; first.prev := first
-			ELSE
-				command.prev := first.prev; command.next := first;
-				first.prev.next := command; first.prev := command;
-			END;
-			current := NIL;
-		END AddCommand;
-
-		PROCEDURE &Init*;
-		BEGIN first := NIL; current := NIL;
-		END Init;
-
-	END CommandHistory;
-
-TYPE
-
-	Command = POINTER TO RECORD
-		command: ARRAY CmdLen OF CHAR;			(* command (e.g. <module>"."<command> *)
-		parameters: ARRAY ParamLen OF CHAR;	(* parameters *)
-		context: Commands.Context;	(* context (in, out & err streams *)
-		pipe : Pipes.Pipe;
-		next: Command;
+PROCEDURE ListCommands(context: Commands.Context; CONST module: ARRAY OF CHAR);
+VAR list: Candidate;
+BEGIN
+	IF ~CommandNames(module, list) THEN
+		context.error.String(module); context.error.String(": module not found"); context.error.Ln;
+		context.result := Commands.CommandNotFound;
+	ELSE
+		WHILE list # NIL DO
+			context.out.String(module); context.out.Char('.'); context.out.String(list.name); context.out.Ln;
+			list := list.next;
+		END;
 	END;
+END ListCommands;
 
-	Alias = POINTER TO RECORD
-		alias,
-		command: ARRAY CmdLen OF CHAR;
-		parameters: ARRAY ParamLen OF CHAR;
-		next: Alias;
+PROCEDURE Help*(context: Commands.Context);
+BEGIN
+	context.out.String("aoe - Active Oberon environment"); context.out.Ln;
+	context.out.String("Usage: aoe [Module.Procedure [arguments]]"); context.out.Ln;
+	context.out.String("No arguments: terminal shell, or one command per line on stdin."); context.out.Ln;
+	context.out.String("Compiler.Compile file.Mod    Linker.Link ...    System.DoFile script.txt"); context.out.Ln;
+	context.out.String("Module lists its callable commands. No compile/link/do aliases."); context.out.Ln;
+	context.out.String("Operators: |  <  >  >>  &; aliases: alias, unalias, loadalias, savealias; wait"); context.out.Ln;
+	context.out.String("--config=file runs a shell script before the command or interactive shell."); context.out.Ln;
+	context.out.String("Shell.Source file: script; Shell.RunFile file: script then shell; batch < file"); context.out.Ln;
+	context.out.String("Tab: modules, commands, files; arrows: history/cursor; Ctrl+C: cancel line"); context.out.Ln;
+	context.out.String("Ctrl+D on an empty line, exit or quit: leave shell."); context.out.Ln;
+END Help;
+
+PROCEDURE Execute*(context: Commands.Context);
+BEGIN
+	ShellCommands.Execute(context);
+END Execute;
+
+PROCEDURE Describe*(context: Commands.Context);
+VAR module: Modules.Name;
+BEGIN IF context.arg.GetString(module) THEN ListCommands(context, module) END END Describe;
+
+PROCEDURE Alias*(context: Commands.Context);
+BEGIN ShellCommands.Alias(context) END Alias;
+
+PROCEDURE Unalias*(context: Commands.Context);
+BEGIN ShellCommands.Unalias(context) END Unalias;
+
+PROCEDURE LoadAliases*(context: Commands.Context);
+BEGIN ShellCommands.LoadAliases(context) END LoadAliases;
+
+PROCEDURE SaveAliases*(context: Commands.Context);
+BEGIN ShellCommands.SaveAliases(context) END SaveAliases;
+
+PROCEDURE Wait*(context: Commands.Context);
+BEGIN ShellCommands.Wait(context) END Wait;
+
+PROCEDURE Source*(context: Commands.Context);
+BEGIN ShellCommands.Source(context) END Source;
+
+PROCEDURE Clear*(context: Commands.Context);
+BEGIN context.out.Char(ESC); context.out.String("[2J"); context.out.Char(ESC); context.out.String("[H") END Clear;
+
+PROCEDURE Version*(context: Commands.Context);
+BEGIN context.out.String("aoe shell"); context.out.Ln END Version;
+
+PROCEDURE Copy*(context: Commands.Context);
+VAR buffer: ARRAY 1024 OF CHAR; count: SIZE;
+BEGIN
+	WHILE (context.in.res = Streams.Ok) & (context.out.res = Streams.Ok) DO
+		context.in.Bytes(buffer, 0, LEN(buffer), count);
+		IF count > 0 THEN context.out.Bytes(buffer, 0, count) END;
 	END;
+END Copy;
 
-	NotifyProcedure* = PROCEDURE {DELEGATE} (command : INTEGER);
+PROCEDURE Left(w: Streams.Writer; count: SIZE);
+VAR i: SIZE;
+BEGIN
+	FOR i := 1 TO count DO w.Char(ESC); w.String("[D") END;
+END Left;
 
-TYPE
+PROCEDURE Redraw(w: Streams.Writer; CONST line: Line; len, cursor: SIZE);
+BEGIN
+	w.Char(CR); w.String("> "); w.String(line); w.Char(ESC); w.String("[K");
+	Left(w, len-cursor); w.Update;
+END Redraw;
 
-	Shell* = OBJECT
-	VAR
-		echo, dead, close: BOOLEAN;
-		context: Commands.Context;
-		command: ARRAY MaxLen OF CHAR;
-		res: INTEGER;
-		nestingLevel : SIZE; (* how many shells run in this shell? *)
-		aliases: Alias;
-		prompt: ARRAY 32 OF CHAR;
+PROCEDURE Paths(CONST token: ARRAY OF CHAR; VAR list: Candidate);
+VAR path, base, prefix, full, name, value: Files.FileName;
+	i, split: SIZE; directory: ADDRESS; entry: Unix.Dirent; status: Unix.Status;
+	ch: CHAR; result: SIGNED32; usable: BOOLEAN;
+BEGIN
+	split := 0; i := 0;
+	WHILE token[i] # 0X DO IF token[i] = '/' THEN split := i+1 END; INC(i) END;
+	i := 0; WHILE i < split DO path[i] := token[i]; INC(i) END; path[i] := 0X;
+	Strings.Copy(token, split, Strings.Length(token)-split, prefix);
+	IF path = "" THEN base := "." ELSE COPY(path, base) END;
+	directory := Unix.opendir(ADDRESS OF base);
+	IF directory = NIL THEN RETURN END;
+	entry := Unix.readdir(directory);
+	WHILE entry # NIL DO
+		(* Files.Enumerator canonicalizes names, losing the spelling of symlinks.
+		   readdir preserves the name the user actually needs to type. *)
+		i := 0; usable := TRUE;
+		REPEAT
+			SYSTEM.GET(ADDRESS OF entry.name+i, ch); name[i] := ch; INC(i);
+			IF (ch = '"') OR (ch = "'") OR (ch = CR) OR (ch = LF) THEN usable := FALSE END;
+		UNTIL (ch = 0X) OR (i = LEN(name));
+		name[LEN(name)-1] := 0X;
+		IF usable & (name # ".") & (name # "..") & Prefix(prefix, name) &
+			((prefix[0] = '.') OR (name[0] # '.')) THEN
+			COPY(path, value); Strings.Append(value, name);
+			Files.JoinPath(base, name, full);
+			result := Unix.stat(ADDRESS OF full, status);
+			IF (result = 0) & (status.mode DIV 1000H MOD 10H = 4) THEN Strings.Append(value, "/") END;
+			Add(list, value);
+		END;
+		entry := Unix.readdir(directory);
+	END;
+	Unix.closedir(directory);
+END Paths;
 
-		(* Connection to the entry hosting this shell instance *)
-		upcall : NotifyProcedure;
-
-		commandHistory : CommandHistory;
-		firstCR : CHAR;
-
-		currentCommand: Command;
-
-		PROCEDURE &Init*(in: Streams.Reader; out, err: Streams.Writer; echo: BOOLEAN; CONST prompt: ARRAY OF CHAR);
-		BEGIN
-			ASSERT((in # NIL) & (out # NIL) & (err # NIL));
-			NEW(context, in, NIL, out, err, SELF);
-			close := FALSE; dead := FALSE; command[0] := 0X; res := 0; SELF.echo := echo; COPY(prompt, SELF.prompt);
-			NEW(commandHistory); firstCR := 0X;
-		END Init;
-
-		PROCEDURE Exit*;
-		BEGIN
-			close := TRUE;
-		END Exit;
-
-		PROCEDURE DeleteStringFromDisplay(CONST x : ARRAY OF CHAR);
-		VAR i, len : SIZE;
-		BEGIN
-			len := Strings.Length(x);
-			FOR i :=	 0 TO len-1 DO context.out.Char(Backspace); END;
-			FOR i :=	 0 TO len-1 DO context.out.Char(Space); END;
-			FOR i :=	 0 TO len-1 DO context.out.Char(Backspace); END;
-		END DeleteStringFromDisplay;
-
-		PROCEDURE ReadCommand(VAR command : ARRAY OF CHAR): CHAR;
-		VAR
-			ch: CHAR;
-			currentIndex : SIZE;
-
-			PROCEDURE IsAsciiCharacter(ch : CHAR) : BOOLEAN;
-			BEGIN
-				RETURN ORD(ch) <= 127;
-			END IsAsciiCharacter;
-
-			PROCEDURE IsControlCharacter(ch : CHAR) : BOOLEAN;
-			BEGIN
-				RETURN ORD(ch) < 32;
-			END IsControlCharacter;
-
-			PROCEDURE HandleEscapeSequence;
-			BEGIN
-				ch := context.in.Get();
-				ch := CHR(ORD(ch)+128);
-
-				IF (ch = CursorDown) OR (ch = CursorUp) THEN (* Command History Keys *)
-
-					command[currentIndex+1] := 0X;
-					DeleteStringFromDisplay(command);
-
-					IF ch = CursorUp THEN
-						commandHistory.GetPreviousCommand(command);
-					ELSE
-						commandHistory.GetNextCommand(command);
-					END;
-					currentIndex := Strings.Length(command)-1;
-					IF echo & (command # "") THEN context.out.String(command); context.out.Update; END;
-				ELSE
-					(* ignore escaped character *)
-				END;
-			END HandleEscapeSequence;
-
-		BEGIN
-			command := ""; currentIndex := -1;
-
-			LOOP
-				ch := context.in.Get();
-
-				IF IsAsciiCharacter(ch) THEN
-
-					IF IsControlCharacter(ch) OR (ch = Delete) THEN
-
-						IF (ch = CR) OR (ch = LF) THEN
-							(* skip redundant CR and LF to avoid generation of empty commands. This requires peek functionality which doesn't work on the Input stream from an underlying OS, so a decoupler is needed that transforms that into an oberon stream*)
-							(* actually: it is much simpler: just memorize the first seen CR or LF and start executing from there *)
-							IF firstCR = 0X THEN
-								firstCR := ch;
-								EXIT;
-							ELSIF ch = firstCR THEN
-								EXIT
-							END;
-						ELSIF (ch = Streams.EOT) OR (context.in.res # Streams.Ok) THEN
-							EXIT;
-						ELSIF (ch = Backspace) OR (ch = Delete)THEN
-							IF currentIndex >= 0 THEN (* There is a character at the left of the cursor *)
-								command[currentIndex] := 0X;
-								DEC(currentIndex);
-								IF echo THEN
-									context.out.Char(Backspace); context.out.Char(Space); context.out.Char(Backspace); context.out.Update;
-								END;
-							END;
-						ELSIF (ORD(ch) = 03H) THEN
-						(*	IF runner # NIL THEN AosActive.TerminateThis(runner); END; *)
-						ELSIF (ch = EscapeChar1) THEN (* Escape sequence *)
-							IF context.in.Peek() = EscapeChar2 THEN ch := context.in.Get(); HandleEscapeSequence;
-							ELSIF context.in.Peek () = Escape THEN
-								command[currentIndex+1] := 0X;
-								DeleteStringFromDisplay (command); context.out.Update;
-								ch := context.in.Get (); command := ""; currentIndex := -1;
-							END;
-						ELSE
-							(* ignore other control characters *)
-						END;
-
-					ELSE
-						IF currentIndex <= LEN(command) - 2 (* Always need space for 0X *) THEN
-							INC(currentIndex);
-							command[currentIndex] := ch;
-							IF echo THEN context.out.Char(ch); context.out.Update; END;
-						END;
-					END;
-
-				ELSE
-					(* ignore non-ascii characters *)
-					IF close OR (context.in.res # Streams.Ok) THEN
-						EXIT;
-					END;
-				END;
+PROCEDURE Complete(w: Streams.Writer; VAR line: Line; VAR len, cursor: SIZE);
+VAR all, matches, p: Candidate; token, value, module: Files.FileName;
+	i, start, dot, count, end, n: SIZE; quote, ch: CHAR;
+	command, needFile, inWord, commandToken: BOOLEAN; aliases: Streams.StringReader;
+BEGIN
+	(* Complete the token at the cursor, preserving the rest of the line. *)
+	start := 0; quote := 0X; command := TRUE; needFile := FALSE; inWord := FALSE; commandToken := TRUE;
+	FOR i := 0 TO cursor-1 DO
+		ch := line[i];
+		IF quote # 0X THEN
+			IF quote = ch THEN quote := 0X END;
+		ELSIF (ch = ' ') OR (ch = TAB) THEN
+			IF inWord THEN
+				IF commandToken THEN command := FALSE END;
+				needFile := FALSE;
 			END;
-			command[currentIndex+1] := 0X;
-
-			IF (ch = LF) OR (ch =CR)  THEN
-				commandHistory.AddCommand(command);
-
-				IF echo THEN context.out.Ln; context.out.Update END
+			inWord := FALSE; start := i+1;
+		ELSIF (ch = '|') OR (ch = '&') THEN
+			command := TRUE; needFile := FALSE; inWord := FALSE; start := i+1;
+		ELSIF (ch = '<') OR (ch = '>') THEN
+			IF inWord & commandToken THEN command := FALSE END;
+			needFile := TRUE; inWord := FALSE; start := i+1;
+		ELSE
+			IF ~inWord THEN commandToken := command & ~needFile; inWord := TRUE; start := i END;
+			IF (ch = '"') OR (ch = "'") THEN quote := ch; start := i+1 END;
+		END;
+	END;
+	IF ~inWord THEN commandToken := command & ~needFile END;
+	IF cursor-start >= LEN(token) THEN RETURN END;
+	i := 0; WHILE (start+i < cursor) & (i < LEN(token)-1) DO token[i] := line[start+i]; INC(i) END;
+	token[i] := 0X;
+	IF ~commandToken THEN Paths(token, all)
+	ELSE
+		dot := -1;
+		FOR i := 0 TO Strings.Length(token)-1 DO IF token[i] = '.' THEN dot := i END END;
+		IF dot >= 0 THEN
+			Strings.Copy(token, 0, dot, module);
+			IF ~CommandNames(module, all) THEN RETURN END;
+			p := all; all := NIL;
+			WHILE p # NIL DO
+				COPY(module, value); Strings.Append(value, "."); Strings.Append(value, p.name);
+				Add(all, value); p := p.next;
 			END;
-			RETURN ch;
-		END ReadCommand;
+		ELSE
+			ModuleNames(".", all); ModuleNames("obj/amd64", all); ModuleNames(CLIEnvironment.objectPath, all);
+		END;
+		ShellCommands.AliasNames(aliases);
+		WHILE aliases.res = Streams.Ok DO aliases.Ln(value); IF value # "" THEN Add(all, value) END END;
+		Add(all, "alias"); Add(all, "unalias"); Add(all, "loadalias"); Add(all, "savealias");
+		Add(all, "wait"); Add(all, "batch"); Add(all, "clear"); Add(all, "version");
+		Add(all, "exit"); Add(all, "quit"); Add(all, "help");
+	END;
+	count := 0; p := all;
+	WHILE p # NIL DO
+		IF Prefix(token, p.name) THEN Add(matches, p.name); INC(count) END;
+		p := p.next;
+	END;
+	IF count = 1 THEN
+		COPY(matches.name, value);
+		end := cursor;
+		WHILE (line[end] # 0X) & (line[end] # ' ') & (line[end] # TAB) &
+			(line[end] # '"') & (line[end] # "'") &
+			((quote # 0X) OR ((line[end] # '|') & (line[end] # '<') & (line[end] # '>') & (line[end] # '&'))) DO INC(end) END;
+		(* Quote unquoted filenames containing whitespace. *)
+		IF ~commandToken & (quote = 0X) THEN
+			i := 0;
+			WHILE (value[i] # 0X) & (value[i] # ' ') & (value[i] # TAB) &
+				(value[i] # '|') & (value[i] # '<') & (value[i] # '>') & (value[i] # '&') DO INC(i) END;
+			IF value[i] # 0X THEN
+				IF Strings.Length(value)+2 >= LEN(value) THEN RETURN END;
+				COPY(value, token); value := '"'; Strings.Append(value, token);
+				IF token[Strings.Length(token)-1] # '/' THEN Strings.Append(value, '"') END;
+			END;
+		ELSIF ~commandToken & (quote # 0X) & (line[end] # quote) &
+			(value[Strings.Length(value)-1] # '/') THEN
+			n := Strings.Length(value);
+			IF n+1 >= LEN(value) THEN RETURN END;
+			value[n] := quote; value[n+1] := 0X;
+		END;
+		n := Strings.Length(value);
+		IF len-(end-start)+n < MaxLine THEN
+			FOR i := len-end TO 0 BY -1 DO line[start+n+i] := line[end+i] END;
+			FOR i := 0 TO n-1 DO line[start+i] := value[i] END;
+			len := len-(end-start)+n; cursor := start+n;
+		END;
+	ELSIF count > 1 THEN
+		w.Ln; p := matches;
+		WHILE p # NIL DO w.String(p.name); w.String("  "); p := p.next END;
+		w.Ln;
+	END;
+	Redraw(w, line, len, cursor);
+END Complete;
 
-		PROCEDURE Parse(VAR cmd: Command; VAR wait: BOOLEAN): INTEGER;
-		VAR sym: SET; pos: SIZE; c, next: CHAR;
+PROCEDURE Remember(CONST line: Line);
+VAR i: INTEGER;
+BEGIN
+	IF line = "" THEN RETURN END;
+	IF (historyCount > 0) & (history[historyCount-1] = line) THEN RETURN END;
+	IF historyCount = MaxHist THEN
+		FOR i := 0 TO MaxHist-2 DO history[i] := history[i+1] END;
+		DEC(historyCount);
+	END;
+	history[historyCount] := line; INC(historyCount);
+END Remember;
 
-			PROCEDURE Init;
-			BEGIN
-				pos := 0; c := 0X; next := command[pos]; sym := start; Scan
-			END Init;
-
-			PROCEDURE Scan;
-			BEGIN
-				IF (sym # eoln) THEN
-					c := next; INC(pos); next := command[pos];
-					CASE c OF
-					| "<": sym := inputFile
-					| "|": sym := pipe
-					| ">": IF (next = ">") THEN sym := outputFileAppend; INC(pos); next := command[pos]; ELSE sym := outputFile END
-					| "&": sym := ampersand
-					| " ", 09X: sym := whitespace
-					| 0X: sym := eoln
-					ELSE sym := char
-					END
-				END
-			END Scan;
-
-			PROCEDURE Match(symbol: SET): BOOLEAN;
-			BEGIN IF (symbol = sym) THEN Scan; RETURN TRUE ELSE RETURN FALSE END
-			END Match;
-
-			PROCEDURE Skip;
-			BEGIN
-				WHILE (sym = whitespace) & (sym # eoln) DO Scan END
-			END Skip;
-
-			PROCEDURE Token(VAR s: ARRAY OF CHAR; cond: SET): BOOLEAN;
-			VAR i: SIZE; quote: BOOLEAN;
-			BEGIN
-				quote := FALSE;
-				WHILE (sym * cond = {}) OR (quote & (sym # eoln)) DO
-					s[i] := c; INC(i); IF (c = '"') OR (c = "'") THEN quote := ~quote END; Scan
+PROCEDURE ReadLine(context: Commands.Context; terminal: BOOLEAN; VAR line: Line; VAR quit: BOOLEAN): BOOLEAN;
+VAR len, cursor, i: SIZE; ch: CHAR; hist: INTEGER; draft: Line; overflow: BOOLEAN;
+BEGIN
+	len := 0; cursor := 0; line := ""; hist := historyCount; quit := FALSE; overflow := FALSE;
+	LOOP
+		context.in.Char(ch);
+		IF context.in.res # Streams.Ok THEN quit := len = 0; EXIT END;
+		IF (ch = LF) OR (ch = CR) THEN EXIT END;
+		IF terminal THEN
+			CASE ch OF
+			| 4X: IF len = 0 THEN quit := TRUE; EXIT END;
+			| 3X: line := ""; context.out.String("^C"); EXIT;
+			| 08X, 7FX:
+				IF cursor > 0 THEN
+					DEC(cursor); DEC(len);
+					FOR i := cursor TO len DO line[i] := line[i+1] END;
 				END;
-				s[i] := 0X;
-				RETURN ~quote
-			END Token;
-
-			PROCEDURE Cmd(): Command;
-			VAR i: SIZE; cmd: Command; arg : Streams.StringReader;
-			BEGIN Skip;
-				IF (sym = char) THEN
-					NEW(cmd);
-					i := 0;
-					WHILE (sym = char) DO cmd.command[i] := c; INC(i); Scan END; cmd.command[i] := 0X; Skip;
-					IF (cmd.command # "") THEN
-						IF (sym * EndOfParam = {}) THEN
-							IF ~Token(cmd.parameters, EndOfParam) THEN cmd := NIL END
+			| TAB: Complete(context.out, line, len, cursor);
+			| ESC:
+				context.in.Char(ch);
+				IF ch = '[' THEN
+					context.in.Char(ch);
+					CASE ch OF
+					| 'A':
+						IF hist > 0 THEN
+							IF hist = historyCount THEN draft := line END;
+							DEC(hist); line := history[hist]; len := Strings.Length(line); cursor := len;
 						END;
-						REPEAT UNTIL ~ReplaceAlias(cmd);
-						NEW(arg, LEN(cmd.parameters)); arg.SetRaw(cmd.parameters, 0, LEN(cmd.parameters));
-						NEW(cmd.context, context.in, arg, context.out, context.error, SELF);
-					ELSE cmd := NIL	(* invalid command (empty string) *)
-					END
-				ELSE cmd := NIL
-				END;
-				RETURN cmd
-			END Cmd;
-
-			PROCEDURE CmdLine(VAR command: Command): INTEGER;
-			VAR cmd, prev: Command; fn: Files.FileName; f: Files.File; fr: Files.Reader; fw: Files.Writer;
-				r: Streams.Reader; w: Streams.Writer; append, piped: BOOLEAN; s: ARRAY 64 OF CHAR;
-			BEGIN
-				cmd := NIL; prev := NIL; command := NIL; res := 0; piped := FALSE;
-				Init;
-				REPEAT
-					cmd := Cmd();
-					IF (cmd # NIL) THEN
-						IF (command = NIL) THEN command := cmd END;
-						IF piped THEN
-							piped := FALSE;
-							IF (prev # NIL) THEN
-								IF (prev.context.out = context.out) & (cmd.context.in = context.in) THEN
-									NEW(prev.pipe, 1024);
-									Streams.OpenReader(r, prev.pipe.Receive); Streams.OpenWriter(w, prev.pipe.Send);
-									prev.context.Init(r, prev.context.arg, w, prev.context.error, SELF);
-									prev.next := cmd
-								ELSE  res := ErrAlreadyPiped (* already piped *)
-								END
-							ELSE res := ErrPipeAtBeginning (* pipe cannot be first symbol *)
-							END
+					| 'B':
+						IF hist < historyCount THEN
+							INC(hist); IF hist = historyCount THEN line := draft ELSE line := history[hist] END;
+							len := Strings.Length(line); cursor := len;
 						END;
-
-						IF Match(inputFile) THEN (* "<" filename *)
-							IF (cmd.context.in = context.in) THEN
-								Skip;
-								IF Token(fn, SET(-char)) & (fn # "") THEN
-									f := Files.Old(fn);
-									IF (f # NIL) THEN
-										Files.OpenReader(fr, f, 0);
-										cmd.context.Init(fr, cmd.context.arg, cmd.context.out, cmd.context.error, SELF)
-									ELSE res := ErrFileNotFound (* file not found *)
-									END
-								ELSE res := ErrInvalidFilename (* invalid filename *)
-								END
-							ELSE res := ErrAlreadyPiped (* error: already piped *)
-							END
-						ELSIF Match(pipe) THEN (* "|" command *)
-							piped := TRUE
+					| 'C': IF cursor < len THEN INC(cursor) END;
+					| 'D': IF cursor > 0 THEN DEC(cursor) END;
+					| 'H': cursor := 0;
+					| 'F': cursor := len;
+					| '3':
+						context.in.Char(ch);
+						IF (ch = '~') & (cursor < len) THEN
+							DEC(len); FOR i := cursor TO len DO line[i] := line[i+1] END;
 						END;
-						prev := cmd
-					ELSE res := ErrInvalidCommand (* invalid command *)
-					END
-				UNTIL (res # 0) OR (cmd = NIL) OR ~piped;
-				IF (res = 0) THEN
-					IF (sym * (outputFile+outputFileAppend) # {}) THEN (* ">"[">"] filename *)
-						append := (sym = outputFileAppend);
-						Scan; Skip;
-						IF Token (fn, EndOfParam (*-char *)) & (fn # "") THEN
-							Skip; f := NIL;
-							IF append THEN f := Files.Old(fn) END;
-							IF (f = NIL) THEN f := Files.New(fn); Files.Register(f) END;
-							IF (f # NIL) THEN
-								IF append THEN
-									Files.OpenWriter(fw, f, f.Length());
-								ELSE
-									Files.OpenWriter(fw, f, 0);
-								END;
-								cmd.context.Init(cmd.context.in, cmd.context.arg, fw, cmd.context.error, SELF);
-								fw.Update;
-							ELSE res := ErrFileNotFound (* cannot open output file *)
-							END
-						ELSE res := ErrInvalidFilename (* invalid filename *)
-						END
-					END
-				END;
-				IF (res = 0) THEN
-					wait := ~Match(ampersand);
-					WHILE (sym # eoln) & Match(whitespace) DO END;
-					IF ~Match(eoln) THEN res := ErrEolnExpected END (* end of line expected *)
-				END;
-				IF (res # 0) THEN
-					context.error.String("Error at position "); context.error.Int(pos, 0); context.error.String(": ");
-					CASE res OF
-					| ErrFileNotFound: COPY("file not found.", s)
-					| ErrInvalidFilename: COPY("invalid file name.", s)
-					| ErrAlreadyPiped: COPY("two input streams.", s)
-					| ErrPipeAtBeginning: COPY("syntax error.", s)
-					| ErrInvalidCommand: COPY("invalid command.", s)
-					| ErrEolnExpected: COPY("too many arguments.", s)
-					ELSE COPY("unknown error.", s)
-					END;
-					context.error.String(s); context.error.Ln; context.error.Update;
-					command := NIL
-				END;
-				RETURN res
-			END CmdLine;
-
-		BEGIN
-			wait := TRUE;
-			RETURN CmdLine(cmd)
-		END Parse;
-
-		PROCEDURE ReadAlias(cmd : Command; verbose : BOOLEAN);
-		VAR s: ARRAY MaxLen OF CHAR; alias, p, q: Alias; i, k: SIZE; c: CHAR;
-		BEGIN
-			IF (cmd.parameters # "") THEN
-				COPY(cmd.parameters, s);
-				NEW(alias);
-				i := 0; c := s[i];
-				WHILE (c # 0X) & (c # "=") DO alias.alias[i] := c; INC(i); c := s[i] END;
-				IF (c = "=") THEN
-					k := 0; INC(i); c := s[i];
-					WHILE (c # 0X) & (c # " ") & (c # TAB) DO alias.command[k] := c; INC(k); INC(i); c := s[i] END;
-				END;
-
-				IF verbose THEN context.out.String(alias.alias); END;
-				IF (alias.command # "") THEN (* add an alias *)
-					WHILE (c # 0X) & ((c = " ") OR (c = TAB)) DO INC(i); c := s[i] END;
-					k := 0;
-					WHILE (c # 0X) DO alias.parameters[k] := c; INC(k); INC(i); c := s[i] END;
-					p := aliases; q := NIL;
-					WHILE (p # NIL) & (p.alias < alias.alias) DO q := p; p := p.next END;
-					IF (q = NIL) THEN aliases := alias; aliases.next := p
-					ELSE q.next := alias; alias.next := p
-					END;
-					IF verbose THEN
-						context.out.String(" = "); context.out.String(alias.command); context.out.Char(" "); context.out.String(alias.parameters);
-					END;
-				ELSE (* remove an alias *)
-					p := aliases; q := NIL;
-					WHILE (p # NIL) & (p.alias < alias.alias) DO q := p; p := p.next END;
-					IF (p # NIL) & (p.alias = alias.alias) THEN
-						IF (q = NIL) THEN aliases := aliases.next
-						ELSE q.next := p.next
-						END
-					END;
-					IF verbose THEN context.out.String(" removed"); END;
-				END;
-				IF verbose THEN context.out.Ln; END;
-			ELSE (* list aliases *)
-				p := aliases;
-				WHILE (p # NIL) DO
-					IF verbose THEN
-						context.out.String(p.alias); context.out.String(" = "); context.out.String(p.command); context.out.Char(" ");
-						context.out.String(p.parameters); context.out.Ln;
-					END;
-					p := p.next
-				END
-			END
-		END ReadAlias;
-
-		PROCEDURE ReplaceAlias(cmd: Command): BOOLEAN;
-		VAR a: Alias; d, i: SIZE;
-		BEGIN
-			a := aliases;
-			WHILE (a # NIL) & (a.alias < cmd.command) DO a := a.next END;
-			IF (a # NIL) & (a.alias = cmd.command) THEN
-				COPY(a.command, cmd.command);
-				IF (a.parameters # "") THEN
-					IF (cmd.parameters = "") THEN COPY(a.parameters, cmd.parameters)
 					ELSE
-						d := Strings.Length(a.parameters) + 1;
-						FOR i := Strings.Length(cmd.parameters) TO 0 BY -1 DO
-							cmd.parameters[i+d] := cmd.parameters[i]
-						END;
-						FOR i := 0 TO d-2 DO cmd.parameters[i] := a.parameters[i] END;
-						cmd.parameters[d-1] := " "
-					END
+					END;
 				END;
-				RETURN TRUE
 			ELSE
-				RETURN FALSE
-			END
-		END ReplaceAlias;
-
-		PROCEDURE ShowHelp;
-		BEGIN
-			context.out.String("--- Help --- "); context.out.Ln;
-			context.out.String("alias: Show list of aliases"); context.out.Ln;
-			context.out.String("alias 'string'='command': Create alias for command"); context.out.Ln;
-			context.out.String("alias 'string': Remove alias"); context.out.Ln;
-			context.out.String("batch: start a new instance of Shell"); context.out.Ln;
-			context.out.String("clear: Clear screen"); context.out.Ln;
-			context.out.String("version: Show BimboShell version"); context.out.Ln;
-			context.out.String("help: Show this help text"); context.out.Ln;
-			context.out.String("exit: Exit Shell"); context.out.Ln;
-			context.out.Update;
-		END ShowHelp;
-
-		PROCEDURE Execute(cmd: Command; wait: BOOLEAN; VAR exit: BOOLEAN);
-		VAR
-			c: Command; flags: SET;
-			res : INTEGER; msg: ARRAY MaxLen OF CHAR; oldContext: Commands.Context;
-			moduleName, commandName : Modules.Name; errormsg : ARRAY 128 OF CHAR;
-		BEGIN
-			IF (cmd.command = "alias") THEN
-				ReadAlias(cmd, TRUE)
-			ELSIF (cmd.command = "loadalias") THEN
-				LoadAliasesFromFile(cmd.parameters, TRUE);
-			ELSIF (cmd.command = "batch") THEN
-				context.out.String(Version); context.out.Ln; context.out.Update;
-				oldContext := context; context := cmd.context;
-				INC(nestingLevel);
-				Run;
-				context := oldContext
-			ELSIF (cmd.command = "exit") THEN
-				DEC(nestingLevel);
-				exit := TRUE
-			ELSIF (cmd.command = "version") THEN
-				context.out.String(Version); context.out.Ln; context.out.Update;
-			ELSIF (cmd.command = "help") THEN
-				ShowHelp;
-			ELSIF (cmd.command = "clear") THEN
-				IF upcall # NIL THEN upcall(Clear); END;
-			ELSE
-				c := cmd; res := 0;
-				WHILE (c # NIL) & (res = 0) DO
-					IF (c.next = NIL) & wait THEN flags := {Commands.Wait}
-					ELSE flags := {}
-					END;
-					Commands.Split(c.command, moduleName, commandName, res, errormsg);
-					IF (res # Commands.Ok) THEN
-						context.error.String(errormsg); context.error.Ln;
-					ELSE
-						currentCommand := c;
-						Commands.Activate(c.command, c.context, flags, res, msg);
-						currentCommand := NIL;
-				(*		IF wait & (cmd.pipe # NIL) THEN
-							KernelLog.String("Pipe closed"); KernelLog.Ln;
-							cmd.pipe.Close;
-						END; *)
-						IF (res # 0) THEN
-							context.error.String("Error in command: "); context.error.String(cmd.command);
-							context.error.String(", params: ");
-							IF c.parameters # "" THEN
-								context.error.String(c.parameters);
-							ELSE
-								context.error.String("None");
-							END;
-							context.error.String(", res: "); context.error.Int(res, 0);
-							context.error.String(" ("); context.error.String(msg); context.error.Char(")");
-							context.error.Ln
-						ELSE c := c.next
-						END;
-					END;
-				END
-			END;
-			context.out.Update; context.error.Update
-		END Execute;
-
-		PROCEDURE Run;
-		VAR cmdList: Command; wait, exit: BOOLEAN; i : SIZE; ch: CHAR;
-		BEGIN
-			exit := FALSE;
-			WHILE ~close & ~exit & (context.in.res = Streams.Ok) DO
-				IF (prompt # "") THEN
-					context.out.String(prompt);
-					FOR i := 0 TO nestingLevel-1 DO
-						context.out.String(NestingLevelIndicator);
-					END;
-					context.out.Update
-				END;
-				ch := ReadCommand(command);
-				IF (context.in.res = Streams.Ok) & (command # "") THEN
-					IF (Parse(cmdList, wait) = 0) THEN
-						Execute(cmdList, wait, exit)
-					END
+				IF (ch >= ' ') & (len < MaxLine-1) THEN
+					FOR i := len TO cursor BY -1 DO line[i+1] := line[i] END;
+					line[cursor] := ch; INC(cursor); INC(len);
 				END;
 			END;
-			context.out.Update; context.error.Update
-		END Run;
+			Redraw(context.out, line, len, cursor);
+		ELSE
+			IF len < MaxLine-1 THEN line[len] := ch; INC(len); line[len] := 0X ELSE overflow := TRUE END;
+		END;
+	END;
+	IF terminal THEN context.out.Ln; context.out.Update END;
+	IF overflow THEN
+		context.error.String("Shell: input line too long"); context.error.Ln;
+		context.result := Commands.CommandParseError;
+	END;
+	RETURN ~overflow;
+END ReadLine;
 
-		(**
-			Returns TRUE if the given context is the context of currently executed command
-		*)
-		PROCEDURE IsCurrentCmdContext*(context: Commands.Context): BOOLEAN;
-		BEGIN
-			RETURN context = currentCommand.context;
-		END IsCurrentCmdContext;
-
-		PROCEDURE AwaitDeath*;
-		BEGIN {EXCLUSIVE}
-			AWAIT(dead)
-		END AwaitDeath;
-
-		PROCEDURE SetUpcall*(proc : NotifyProcedure);
-		BEGIN
-			ASSERT((proc # NIL) & (upcall = NIL));
-			upcall := proc;
-		END SetUpcall;
-
-		PROCEDURE ParseAliases(r : Files.Reader);
-		VAR cmd : Command;
-		BEGIN
-			NEW(cmd);
-			LOOP
-				cmd.parameters := "";
-				r.Ln(cmd.parameters);
-				IF r.res # Streams.Ok THEN EXIT; END;
-				ReadAlias(cmd, FALSE);
-			END;
-		END ParseAliases;
-
-		(* Read aliases from specified file. Returns NIL if file not found or parsing failed. *)
-		PROCEDURE LoadAliasesFromFile(filename : ARRAY OF CHAR; critical: BOOLEAN);
-		VAR in : Files.Reader; f : Files.File;
-		BEGIN
-			IF filename = "" THEN COPY(DefaultAliasFile, filename); END;
-			f := Files.Old(filename);
-			IF f # NIL THEN
-				Files.OpenReader(in, f, 0);
-				IF in # NIL THEN
-					context.out.String("Loading aliases from "); context.out.String(filename); context.out.String("...");
-					ParseAliases(in);
-					context.out.String("done."); context.out.Ln;
+PROCEDURE Start*(context: Commands.Context);
+VAR line: Line; quit, valid: BOOLEAN; ignored: SIGNED32; result: INTEGER;
+	reader: Streams.StringReader; command: Commands.Context; session: ShellCommands.Session;
+	outer: Commands.Context;
+	isTerminal, outerTerminal: BOOLEAN; term, outerSaved, outerEditing: Unix.Termios;
+BEGIN
+	ShellCommands.Initialize(context);
+	IF context.result # Commands.Ok THEN RETURN END;
+	session := ShellCommands.NewSession(context.caller);
+	IF session.depth > 32 THEN context.result := Commands.CommandError; RETURN END;
+	outer := context; context := ShellCommands.Context(context, context.arg, session);
+	outerTerminal := terminal; outerSaved := saved; outerEditing := editing;
+	isTerminal := (context.in = StdIO.env.in) & (tcgetattr(0, term) = 0);
+	IF isTerminal THEN
+		terminal := TRUE; saved := term;
+		editing := saved;
+		editing.lflags := editing.lflags - {0, 1, 3, 6, 15}; (* ISIG, ICANON, ECHO, ECHONL, IEXTEN *)
+		EXCL(editing.iflags, 10); (* IXON *)
+		editing.cc[6] := 1X; editing.cc[5] := 0X; (* VMIN, VTIME *)
+	END;
+	quit := FALSE; result := Commands.Ok;
+	WHILE ~quit & ~session.quit DO
+		IF isTerminal THEN
+			ignored := tcsetattr(0, 0, editing);
+			context.out.String("> "); context.out.Update;
+		END;
+		valid := ReadLine(context, isTerminal, line, quit);
+		IF isTerminal THEN Restore END;
+		IF ~valid THEN
+			result := Commands.CommandParseError;
+			IF ~isTerminal THEN quit := TRUE END;
+		ELSIF ~quit THEN
+			Strings.TrimWS(line);
+			IF (line = "exit") OR (line = "quit") THEN quit := TRUE
+			ELSIF line # "" THEN
+				IF isTerminal THEN Remember(line) END;
+				Streams.OpenStringReader(reader, line);
+				command := ShellCommands.Context(context, reader, session);
+				Execute(command);
+				IF command.result # Commands.Ok THEN
+					result := command.result;
+					IF ~isTerminal THEN quit := TRUE END;
 				END;
-			ELSIF critical THEN
-				context.out.String("Loading aliases failed: File "); context.out.String(filename);
-				context.out.String(" not found."); context.out.Ln;
 			END;
-			context.out.Update;
-		END LoadAliasesFromFile;
+		END;
+		context.out.Update; context.error.Update;
+	END;
+	IF isTerminal THEN Restore; terminal := outerTerminal; saved := outerSaved; editing := outerEditing END;
+	outer.result := result;
+END Start;
 
-	BEGIN {ACTIVE, SAFE}
-		context.out.String(Version); context.out.Ln;
-		context.out.String("Enter 'help' if needed"); context.out.Ln;
-		LoadAliasesFromFile(DefaultAliasFile, FALSE);
-		context.out.Update;
-		Run;
-		IF (upcall # NIL) THEN upcall(ExitShell); END;
-		BEGIN {EXCLUSIVE} dead := TRUE; END;
-	END Shell;
+PROCEDURE RunFile*(context: Commands.Context);
+BEGIN
+	Source(context);
+	IF context.result = Commands.Ok THEN Start(context) END;
+END RunFile;
 
-	PROCEDURE Start*(context: Commands.Context);
-	VAR shell: Shell;
-	BEGIN
-		NEW(shell, context.in, context.out, context.error, FALSE, ">");
-		shell.AwaitDeath()
-	END Start;
-
-	PROCEDURE StartEchoed*(context: Commands.Context);
-	VAR shell: Shell;
-	BEGIN
-		NEW(shell, context.in, context.out, context.error, TRUE, ">");
-		shell.AwaitDeath()
-	END StartEchoed;
-
+BEGIN
+	Unix.Dlsym(Unix.libc, "tcgetattr", ADDRESS OF tcgetattr);
+	Unix.Dlsym(Unix.libc, "tcsetattr", ADDRESS OF tcsetattr);
+	Modules.InstallTermHandler(Restore);
 END Shell.
-
-System.Free Shell ~
-
-WMShell.Open ~

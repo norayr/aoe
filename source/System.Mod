@@ -718,7 +718,7 @@ BEGIN
 			Files.OpenReader(reader, file, 0);
 			REPEAT
 				reader.Char(ch);
-				context.out.Char(ch);
+				IF reader.res = Streams.Ok THEN context.out.Char(ch) END;
 			UNTIL (reader.res # Streams.Ok);
 		ELSE
 			context.error.String("Could not open file "); context.error.String(filename); context.error.Ln;
@@ -808,4 +808,3 @@ System.CollectGarbage ~
 System.ListModules -r ~
 
 System.ModuleState Heaps ~
-

@@ -1,0 +1,52 @@
+MODULE Shell;
+	IMPORT SYSTEM, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
+CONST 
+	MaxLine = 4096; 
+	MaxHist = 64; 
+	ESC = 1BX; 
+	TAB = 9X; 
+	LF = 0AX; 
+	CR = 0DX; 
+TYPE 
+	Line = ARRAY MaxLine OF CHAR; 
+
+	Candidate = POINTER TO RECORD 
+		next: Candidate; 
+		name: Files.FileName; 
+	END; 
+VAR 
+	tcgetattr: PROCEDURE {C}(fd: SIGNED32; VAR term: Unix.Termios):SIGNED32; 
+	tcsetattr: PROCEDURE {C}(fd, action: SIGNED32; CONST term: Unix.Termios):SIGNED32; 
+	saved, editing: Unix.Termios; 
+	terminal: BOOLEAN; 
+	history: ARRAY MaxHist OF Line; 
+	historyCount: INTEGER; 
+
+	PROCEDURE ^ Restore; 
+	PROCEDURE ^ Prefix(CONST prefix, name: ARRAY OF CHAR): BOOLEAN; 
+	PROCEDURE ^ Add(VAR list: Candidate; CONST name: ARRAY OF CHAR); 
+	PROCEDURE ^ CommandNames(CONST module: ARRAY OF CHAR; VAR list: Candidate): BOOLEAN; 
+	PROCEDURE ^ ModuleNames(CONST path: ARRAY OF CHAR; VAR list: Candidate); 
+	PROCEDURE ^ ListCommands(context: Commands.Context; CONST module: ARRAY OF CHAR); 
+	PROCEDURE ^ Help*(context: Commands.Context); 
+	PROCEDURE ^ Execute*(context: Commands.Context); 
+	PROCEDURE ^ Describe*(context: Commands.Context); 
+	PROCEDURE ^ Alias*(context: Commands.Context); 
+	PROCEDURE ^ Unalias*(context: Commands.Context); 
+	PROCEDURE ^ LoadAliases*(context: Commands.Context); 
+	PROCEDURE ^ SaveAliases*(context: Commands.Context); 
+	PROCEDURE ^ Wait*(context: Commands.Context); 
+	PROCEDURE ^ Source*(context: Commands.Context); 
+	PROCEDURE ^ Clear*(context: Commands.Context); 
+	PROCEDURE ^ Version*(context: Commands.Context); 
+	PROCEDURE ^ Copy*(context: Commands.Context); 
+	PROCEDURE ^ Left(w: Streams.Writer; count: SIZE); 
+	PROCEDURE ^ Redraw(w: Streams.Writer; CONST line: Line; len, cursor: SIZE); 
+	PROCEDURE ^ Paths(CONST token: ARRAY OF CHAR; VAR list: Candidate); 
+	PROCEDURE ^ Complete(w: Streams.Writer; VAR line: Line; VAR len, cursor: SIZE); 
+	PROCEDURE ^ Remember(CONST line: Line); 
+	PROCEDURE ^ ReadLine(context: Commands.Context; terminal: BOOLEAN; VAR line: Line; VAR quit: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ Start*(context: Commands.Context); 
+	PROCEDURE ^ RunFile*(context: Commands.Context); 
+BEGIN
+END Shell.

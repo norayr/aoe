@@ -1,0 +1,11 @@
+MODULE CLIEnvironment;
+	IMPORT SYSTEM, Unix, UnixFiles, Files, Streams, Commands, StdIO, Strings;
+CONST 
+VAR 
+	objectPath-: Files.FileName; 
+	executable, directory, name, cwd: Files.FileName; 
+	done: BOOLEAN; 
+
+	PROCEDURE ^ AddPath(CONST path: ARRAY OF CHAR); 
+BEGIN
+END CLIEnvironment.

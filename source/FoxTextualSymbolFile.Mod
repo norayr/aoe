@@ -19,6 +19,12 @@ TYPE
 			IF Trace THEN D.Ln; D.Str("importing "); D.Str(fileName); D.Ln; D.Update;  END;
 			module := NIL;
 			reader := Basic.GetFileReader(fileName);
+			IF (reader = NIL) & (path # "") THEN
+				(* The output directory need not contain every imported library.
+				   Fall back to the project and installation search paths. *)
+				Basic.Concat(fileName, "", moduleFileName, extension);
+				reader := Basic.GetFileReader(fileName);
+			END;
 			IF reader # NIL THEN
 				scanner := Scanner.NewScanner(fileName, reader, reader.Pos(), diagnostics);
 				IF ~scanner.error THEN

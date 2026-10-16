@@ -1,0 +1,43 @@
+MODULE CommandInfo;
+	IMPORT SYSTEM, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
+CONST 
+TYPE 
+	Name* = POINTER TO RECORD 
+		next-: Name; 
+		name-: Modules.Name; 
+	END; 
+
+	ArrayHeader = RECORD 
+		pointerCount: SIZE; 
+		firstPointer: ADDRESS; 
+		length: SIZE; 
+	END; 
+
+	Location = RECORD 
+		block: GenericLinker.Block; 
+		offset: SIZE; 
+	END; 
+
+	Reader = OBJECT {EXCLUSIVE} 
+	VAR 
+		file: Files.File; 
+		moduleName: Modules.Name; 
+		names: Name; 
+		reader: Files.Reader; 
+		linker: GenericLinker.Linker; 
+		done, entered, found: BOOLEAN; 
+
+		PROCEDURE ^  & Init(file: Files.File; CONST module: ARRAY OF CHAR); 
+		PROCEDURE ^ Inspect; 
+		PROCEDURE ^ Result(VAR names: Name): BOOLEAN; 
+	BEGIN{ACTIVE, SAFE} 
+	END Reader; 
+
+	PROCEDURE ^ Add(VAR names: Name; CONST name: Modules.Name); 
+	PROCEDURE ^ Normalize(VAR location: Location): BOOLEAN; 
+	PROCEDURE ^ Follow(linker: GenericLinker.Linker; source: Location; field: SIZE; VAR target: Location): BOOLEAN; 
+	PROCEDURE ^ Read(source: Location; address: ADDRESS; size: SIZE): BOOLEAN; 
+	PROCEDURE ^ TypeMatches(CONST section: ObjectFile.Section; offset: SIZE; allowContext: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ List*(CONST module: ARRAY OF CHAR; VAR names: Name): BOOLEAN; 
+BEGIN
+END CommandInfo.

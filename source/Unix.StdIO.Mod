@@ -2,7 +2,7 @@ MODULE StdIO;	(** AUTHOR gf;  PURPOSE "Unix standard IO and argument channels *)
 
 (* Commands.Context for programs running outside Aos *)
 
-IMPORT SYSTEM, Modules, Commands, Streams,Pipes , Unix;
+IMPORT SYSTEM, Modules, Commands, Streams, Unix;
 
 #IF COOP THEN
 	IMPORT Activities, Counters, Environment;
@@ -14,7 +14,6 @@ TYPE
 	String=POINTER TO ARRAY OF CHAR;
 VAR
 	env-: Commands.Context;
-	stdInDecoupler: Pipes.ReadDecoupler;
 
 PROCEDURE Args(): String;
 VAR size, pos: SIZE; i,j: SIGNED32; str: String;
@@ -31,15 +30,18 @@ BEGIN
 		END;
 		INC(pos);
 	END;
-	size := pos + 1;
+	size := pos + 3; (* include quotes around the executable name *)
 	NEW(str, size);
 	pos := 0;
 	FOR i := 0 TO argc-1 DO
+		(* StdIOShell consumes argv[0] as one string, even for paths with spaces. *)
+		IF i = 0 THEN str[pos] := '"'; INC(pos) END;
 		j := 0;
 		WHILE argv[i,j] # 0X DO
 			str[pos] := argv[i,j];
 			INC(pos); INC(j);
 		END;
+		IF i = 0 THEN str[pos] := '"'; INC(pos) END;
 		str[pos] := " ";
 		INC(pos);
 	END;
@@ -103,7 +105,7 @@ BEGIN
 			INC( ofs, ures );  DEC( size, ures );  INC( len, ures )
 		END;
 		IF ures < 0 THEN err := Unix.errno() END;
-	UNTIL (len >= min) OR ((ures <= 0) & (err # Unix.EINTR) & (err # 0));
+	UNTIL (len >= min) OR (ures = 0) OR ((ures < 0) & (err # Unix.EINTR));
 	IF len >= min THEN  res := Streams.Ok  ELSE  res := Streams.EOF  END;
 END ReceiveStdin;
 
@@ -136,8 +138,9 @@ VAR
 BEGIN
 	str := Args();
 	NEW( arg, LEN(str) ); arg.Set(str^);
-	NEW(stdInDecoupler, ReceiveStdin);
-	NEW( stdin, stdInDecoupler.Receive, 1024 );
+	(* Do not prefetch shell lines or steal input from commands. In particular,
+	   keep redirected stdin and terminal input on the same, EOF-aware reader. *)
+	NEW( stdin, ReceiveStdin, 1 );
 	NEW( stdout, SendStdout, 1024 );
 	NEW( errout, SendErrout, 512 );
 	NEW( env, stdin, arg, stdout, errout, NIL );
