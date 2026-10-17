@@ -10,7 +10,7 @@ CONST
 		DefaultObjectFileExtension* = ".GofU";
 	#ELSIF AMD64 THEN
 		Version = "A2 Gen. 64-bit, ";
-		DefaultObjectFileExtension* = ".GofUu";
+		DefaultObjectFileExtension* = ".Obj";
 	#ELSIF ARM THEN
 		Version = "A2 Gen. ARM, ";
 		DefaultObjectFileExtension* = ".GofA";	

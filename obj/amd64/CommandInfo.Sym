@@ -1,5 +1,5 @@
 MODULE CommandInfo;
-	IMPORT SYSTEM, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
+	IMPORT SYSTEM, Machine, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
 CONST 
 TYPE 
 	Name* = POINTER TO RECORD 

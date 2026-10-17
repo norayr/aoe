@@ -3,7 +3,7 @@ MODULE Machine;
 CONST 
 	DefaultConfig = \"Color 0  StackSize 128"\; 
 	Version = \"A2 Gen. 64-bit, "\; 
-	DefaultObjectFileExtension* = \".GofUu"\; 
+	DefaultObjectFileExtension* = \".Obj"\; 
 	Second* = 1000; 
 	MTTR* = 12; 
 	MMX* = 23; 

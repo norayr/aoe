@@ -123,7 +123,7 @@ From this repository:
 ```
 
 `Hello.Run` creates an active object and waits for it with `AWAIT`. Compilation
-writes `Hello.GofUu` and `Hello.SymUu` into the project's `obj/amd64/`. The runner can
+writes `Hello.Obj` and `Hello.Sym` into the project's `obj/amd64/`. The runner can
 also be invoked by absolute path from another directory; its search paths are
 the caller's working directory, its `obj/amd64/`, and the installation's
 `obj/amd64/`. Modules in the current directory remain usable too.
@@ -145,7 +145,7 @@ aoe is implemented with A2 streams and glibc terminal functions.
 ```
 
 File paths are relative to the directory where you start `aoe`; `Hello.Run`
-loads `obj/amd64/Hello.GofUu`. `System` lists its callable commands.
+loads `obj/amd64/Hello.Obj`. `System` lists its callable commands.
 `System.Show` prints text, while `System.ShowFile` displays file contents.
 
 Useful commands include `System.ListModules` (loaded modules),
@@ -156,7 +156,7 @@ Tab completes module names, callable commands (for example
 `System.Sh`), and filename/directory arguments. Ambiguous matches are listed;
 unique filenames containing spaces are quoted. Completion sees freshly compiled
 modules without restarting the shell. `CommandInfo` reads compiler-generated
-command tables from `.GofUu` files without linking or initializing the target
+command tables from `.Obj` files without linking or initializing the target
 module; symbol files are not needed for completion. Already loaded command
 tables are a fallback when object files are unavailable.
 The signature rule matches command invocation: no return value, and either no
@@ -291,7 +291,7 @@ Blank lines and lines starting with `#` are ignored. Batch errors stop execution
 and produce a nonzero exit status. `System.DoFile` retains A2's tilde-delimited recipe format;
 stdin scripts use one complete command per line.
 
-Application imports need matching `.SymUu` files to compile and `.GofUu` files
+Application imports need matching `.Sym` files to compile and `.Obj` files
 to run. Additional libraries can be added, but desktop-dependent modules are
 not included. Compiler options with values use `=`, e.g. `--destPath=objects/`;
 create the output directory first. The upstream argument channel still joins

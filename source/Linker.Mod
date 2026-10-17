@@ -1104,7 +1104,7 @@ BEGIN
 	defaults.Add("Win32CUI","--fileFormat=PE32CUI --fileName=oberon.exe --extension=GofW --displacement=401000H");
 	defaults.Add("Win64CUI","--fileFormat=PE64CUI --fileName=oberon.exe --extension=GofWw --displacement=401000H");
 	defaults.Add("Linux32","--fileFormat=Raw --fileName=oberon --extension=.GofU --displacement=08048000H");
-	defaults.Add("Linux64","--fileFormat=Raw --fileName=oberon --extension=.GofUu --displacement=08048000H");
+	defaults.Add("Linux64","--fileFormat=Raw --fileName=oberon --extension=.Obj --displacement=08048000H");
 	defaults.Add("LinuxARM","--fileFormat=Raw --fileName=oberon --extension=.GofA --displacement=010000H");	
 	defaults.Add("RPI","--fileName=kernel.img --extension=.Goa --displacement=8000H -sa ");
 	defaults.Add("Solaris32", "--fileFormat=UnixRaw --fileName=oberon.bin --extension=.GofU --displacement=0" );

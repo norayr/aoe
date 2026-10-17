@@ -1,6 +1,6 @@
 MODULE CommandInfo; (** Discover callable commands without loading their modules. *)
 
-IMPORT SYSTEM, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
+IMPORT SYSTEM, Machine, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
 
 TYPE
 	Name* = POINTER TO RECORD next-: Name; name-: Modules.Name END;
@@ -134,7 +134,7 @@ PROCEDURE List*(CONST module: ARRAY OF CHAR; VAR names: Name): BOOLEAN;
 VAR file: Files.File; filename: Files.FileName; reader: Reader; i: SIZE; loaded: Modules.Module;
 BEGIN
 	names := NIL;
-	COPY(module, filename); Strings.Append(filename, ".GofUu"); file := Files.Old(filename);
+	COPY(module, filename); Strings.Append(filename, Machine.DefaultObjectFileExtension); file := Files.Old(filename);
 	IF file # NIL THEN
 		NEW(reader, file, module);
 		IF reader.Result(names) THEN RETURN TRUE END;

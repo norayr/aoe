@@ -23,7 +23,7 @@ From any working directory:
 ```sh
 /path/to/aoe/bin/amd64/aoe                  # shell; Tab completion, Ctrl+D to exit
 /path/to/aoe/bin/amd64/aoe Compiler.Compile -p=Unix64 Hello.Mod
-/path/to/aoe/bin/amd64/aoe Hello.Run         # loads obj/amd64/Hello.GofUu
+/path/to/aoe/bin/amd64/aoe Hello.Run         # loads obj/amd64/Hello.Obj
 /path/to/aoe/bin/amd64/aoe System.ShowFile source/Hello.Mod
 /path/to/aoe/bin/amd64/aoe System.DoFile commands.txt
 /path/to/aoe/bin/amd64/aoe < lines.txt       # one complete command per line
@@ -34,8 +34,10 @@ The runner searches the current directory, its `obj/amd64/`, and the installatio
 moved and does not need the original repository. Compilation writes object and
 symbol files into the project's `obj/amd64/` by default, creating it if needed.
 Explicit `--destPath=./` preserves current-directory output. Imports need matching
-`.SymUu` files; execution needs matching `.GofUu` files. Compiler options with
+`.Sym` files; execution needs matching `.Obj` files. Compiler options with
 values use `=`, for example `--destPath=objects/` (create the directory first).
+These extensions name A2's existing module formats, not ELF object files.
+Recompile application modules from older installations using `.GofUu`/`.SymUu`.
 The upstream argument channel joins argv into a command string; for filenames
 with spaces, preserve literal Oberon quotes, e.g. `'"my source.Mod"'`.
 

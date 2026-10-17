@@ -24,7 +24,7 @@ CONST
 	Aligned=0;
 	Fixed=1;
 
-	DefaultExtension* = ".Gof";
+	DefaultExtension* = ".Obj";
 
 TYPE
 	Unit* = SIZE;

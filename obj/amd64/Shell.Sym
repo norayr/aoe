@@ -1,5 +1,5 @@
 MODULE Shell;
-	IMPORT SYSTEM, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
+	IMPORT SYSTEM, Machine, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
 CONST 
 	MaxLine = 4096; 
 	MaxHist = 64; 

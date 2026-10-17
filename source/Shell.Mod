@@ -1,6 +1,6 @@
 MODULE Shell; (** Console shell, following polpo's loksh interaction model. *)
 
-IMPORT SYSTEM, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
+IMPORT SYSTEM, Machine, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
 
 CONST
 	MaxLine = 4096; MaxHist = 64;
@@ -52,14 +52,15 @@ END CommandNames;
 
 PROCEDURE ModuleNames(CONST path: ARRAY OF CHAR; VAR list: Candidate);
 VAR enum: Files.Enumerator; mask, full, dir, name: Files.FileName;
-	flags: SET; time, date: SIGNED32; size: Files.Size; n: SIZE;
+	flags: SET; time, date: SIGNED32; size: Files.Size; n, extensionLength: SIZE;
 BEGIN
-	Files.JoinPath(path, "*.GofUu", mask);
+	Files.JoinPath(path, "*", mask); Strings.Append(mask, Machine.DefaultObjectFileExtension);
+	extensionLength := Strings.Length(Machine.DefaultObjectFileExtension);
 	NEW(enum); enum.Open(mask, {});
 	WHILE enum.GetEntry(full, flags, time, date, size) DO
 		Files.SplitPath(full, dir, name); n := Strings.Length(name);
-		IF (n > 6) & ~(Files.Directory IN flags) THEN
-			name[n-6] := 0X; Strings.Append(name, "."); Add(list, name);
+		IF (n > extensionLength) & ~(Files.Directory IN flags) THEN
+			name[n-extensionLength] := 0X; Strings.Append(name, "."); Add(list, name);
 		END;
 	END;
 	enum.Close;

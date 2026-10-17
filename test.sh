@@ -11,6 +11,12 @@ trap 'exit 1' HUP INT TERM
 unset DISPLAY AOSPATH
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+for file in "$distribution"/obj/amd64/*; do
+    case "$file" in
+        *.Obj|*.Sym) ;;
+        *) fail "unexpected installed module extension: ${file##*/}" ;;
+    esac
+done
 run() {
     if ! timeout 300 "$@" > "$tmp/output" 2>&1; then
         cat "$tmp/output" >&2
@@ -32,8 +38,9 @@ cp "$distribution/examples/Hello.Mod" "$tmp/work/Hello.Mod"
 cd "$tmp/work"
 run "$runner" Compiler.Compile -p=Unix64 Hello.Mod
 contains 'Hello done.'
-[ -f obj/amd64/Hello.GofUu ] && [ -f obj/amd64/Hello.SymUu ] || fail 'missing compiled module'
-[ ! -e Hello.GofUu ] || fail 'default compiler output still uses current directory'
+[ -f obj/amd64/Hello.Obj ] && [ -f obj/amd64/Hello.Sym ] || fail 'missing compiled module'
+[ ! -e Hello.Obj ] && [ ! -e Hello.Sym ] || fail 'default compiler output still uses current directory'
+[ ! -e obj/amd64/Hello.GofUu ] && [ ! -e obj/amd64/Hello.SymUu ] || fail 'compiler still uses legacy extensions'
 run "$runner" Hello.Run
 contains 'Hello from an Active Oberon CLI object!'
 if [ -L "$distribution/aoe" ]; then
@@ -70,7 +77,7 @@ cp Hello.Mod source/Hello.Mod
 run "$runner" System.ShowFile source/Hello.Mod
 contains 'MODULE Hello;'
 run "$runner" Compiler.Compile --destPath=./ Hello.Mod
-[ -f Hello.GofUu ] && [ -f Hello.SymUu ] || fail 'explicit current-directory output failed'
+[ -f Hello.Obj ] && [ -f Hello.Sym ] || fail 'explicit current-directory output failed'
 run "$runner" Hello.Run
 contains 'Hello from an Active Oberon CLI object!'
 reject "$runner" MissingModule.Run
@@ -133,7 +140,7 @@ tr -d '\r' < "$tmp/output" > actual-commands
 cmp expected-commands actual-commands || fail 'command discovery differs from callable signatures'
 [ ! -e command-info-initialized ] || fail 'command discovery initialized a module'
 # Completion must work from object metadata alone, not depend on symbol files.
-mv obj/amd64/CommandProbe.SymUu CommandProbe.symbol-backup
+mv obj/amd64/CommandProbe.Sym CommandProbe.symbol-backup
 run "$runner" CommandProbe
 tr -d '\r' < "$tmp/output" > actual-commands
 cmp expected-commands actual-commands || fail 'command discovery needs symbol files'
