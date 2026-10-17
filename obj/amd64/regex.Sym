@@ -1,0 +1,27 @@
+MODULE regex;
+CONST 
+	noerror* = 0; 
+	patternTooLong* =  -1; 
+	missingBracket* =  -2; 
+	trailingEscape* =  -3; 
+	misplacedRepeat* =  -4; 
+TYPE 
+	Pattern* = POINTER TO PatternDesc; 
+
+	PatternDesc* = RECORD 
+		source: ARRAY 256 OF CHAR; 
+		ignoreCase: BOOLEAN; 
+	END; 
+
+	PROCEDURE ^ Upper(ch: CHAR): CHAR; 
+	PROCEDURE ^ Equal(a, b: CHAR; ignoreCase: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ AtomEnd(CONST source: ARRAY OF CHAR; pos: INTEGER): INTEGER; 
+	PROCEDURE ^ InClass(CONST source: ARRAY OF CHAR; pos: INTEGER; ch: CHAR; ignoreCase: BOOLEAN): BOOLEAN; 
+	PROCEDURE ^ AtomMatches(P: Pattern; pos: INTEGER; ch: CHAR): BOOLEAN; 
+	PROCEDURE ^ MatchHere(P: Pattern; ppos: INTEGER; CONST text: ARRAY OF CHAR; tpos: INTEGER; VAR end: INTEGER): BOOLEAN; 
+	PROCEDURE ^ Validate(CONST source: ARRAY OF CHAR; VAR error, pos: INTEGER); 
+	PROCEDURE ^ Compile*(CONST source: ARRAY OF CHAR; ignoreCase: BOOLEAN; VAR P: Pattern; VAR error, pos: INTEGER); 
+	PROCEDURE ^ CompileLiteral*(CONST source: ARRAY OF CHAR; ignoreCase: BOOLEAN; VAR P: Pattern; VAR error, pos: INTEGER); 
+	PROCEDURE ^ Search*(P: Pattern; CONST text: ARRAY OF CHAR; VAR beg, end: INTEGER); 
+BEGIN
+END regex.

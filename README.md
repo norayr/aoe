@@ -76,7 +76,7 @@ Sorry for bothering you with historical details. (:
 Fast forward to 2026.
 
 1. We imported 66 unchanged upstream modules, then
-   added CLI environment, command metadata and shell command modules. The 69-module build recipe
+   added CLI environment, command metadata, shell command and grep modules. The 71-module build recipe
    is `build.Tool`.
    It includes the runtime, shell, compiler and linker.
 2. `CLIEnvironment.Mod` installs search paths for the caller's
@@ -211,6 +211,43 @@ must finish: runtime shutdown stops remaining activities.
 one; these are low-level runtime operations, not Bash job control. Killing a
 thread can leave shared state or a waiting command incomplete. There are no
 `fg`/`bg` commands.
+
+### Filtering text with grep
+
+`grep.Word` searches for literal substrings; `grep.Regex` uses polpo's small
+regular-expression engine. Both consume standard input when no files are given:
+
+```text
+> System.ShowFile Commands.Sym | grep.Word PROCEDURE
+> System.ShowFile Clock.Sym | grep.Regex "Get.*" | grep.Word SIGNED32
+> grep.Word -i oberon < README.md
+> grep.Regex -n "^[A-Z]" source/Commands.Mod
+> grep.Word -l AWAIT "source/*.Mod"
+```
+
+Options can be combined: `-i` ignores ASCII case, `-v` selects nonmatching lines,
+`-l` prints only matching filenames, and `-n` adds line numbers. `--` ends option
+parsing so a pattern can begin with `-`. A file operand of `-` reads standard
+input. File searches prefix lines with the filename; piped input has no prefix
+unless `-n` is requested. `-l` calls standard input `(standard input)`.
+File masks support `*` and `?` in the basename, not recursive directory patterns.
+
+Regex syntax includes `.`, `^`, `$`, character classes and ranges (`[a-z]`,
+`[^0-9]`), repetition (`*`, `+`, `?`), and backslash escapes. There are no groups,
+alternation or backreferences. Matching is byte-oriented, not Unicode-aware.
+Patterns have a 255-byte compiled limit; literal metacharacters consume an extra
+escape byte. Input lines grow as needed rather than being silently truncated.
+LF, CRLF and CR input is accepted; matching lines are written with LF endings,
+including an unterminated final line. NUL-containing input is rejected as non-text.
+This command reads plain text, not encoded Oberon document files; convert those
+to plain text first.
+
+No matching lines produces a nonzero command result without a diagnostic; errors
+also fail and print to standard error. As with any failed command, no match stops
+a batch script or fails a pipeline. The launcher currently maps all command
+failures to Linux exit status 1 rather than distinguishing grep's usual 1 and 2.
+`grep.Help` summarizes usage. The adaptations and their GPLv3 license are
+described in [UPSTREAM.md](UPSTREAM.md).
 
 ### Aliases and startup configuration
 

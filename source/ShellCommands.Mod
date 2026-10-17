@@ -567,7 +567,7 @@ BEGIN
 			END;
 		END;
 		context.result := res;
-		IF res # Commands.Ok THEN context.error.String(msg); context.error.Ln END;
+		IF (res # Commands.Ok) & (msg # "") THEN context.error.String(msg); context.error.Ln END;
 	END;
 END Dispatch;
 

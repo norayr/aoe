@@ -1,0 +1,26 @@
+MODULE grep;
+	IMPORT Commands, Streams, Files, Strings, Unix, regex;
+CONST 
+TYPE 
+	Search = OBJECT 
+	VAR 
+		context: Commands.Context; 
+		pattern: regex.Pattern; 
+		ignoreCase, invert, namesOnly, numbers, matched, failed: BOOLEAN; 
+
+		PROCEDURE ^  & Init(context: Commands.Context); 
+		PROCEDURE ^ Error(CONST message, name: ARRAY OF CHAR); 
+		PROCEDURE ^ NextArg(VAR arg: ARRAY OF CHAR): BOOLEAN; 
+		PROCEDURE ^ MatchLine(CONST name, line: ARRAY OF CHAR; lineNo: SIGNED64): BOOLEAN; 
+		PROCEDURE ^ SearchStream(reader: Streams.Reader; CONST name: ARRAY OF CHAR); 
+		PROCEDURE ^ SearchFile(CONST path, name: ARRAY OF CHAR); 
+		PROCEDURE ^ SearchMask(CONST mask: ARRAY OF CHAR); 
+		PROCEDURE ^ Run(literal: BOOLEAN); 
+	END Search; 
+
+	PROCEDURE ^ GlobMatchAt(CONST pat, name: ARRAY OF CHAR; pi, ni: SIZE): BOOLEAN; 
+	PROCEDURE ^ Word*(context: Commands.Context); 
+	PROCEDURE ^ Regex*(context: Commands.Context); 
+	PROCEDURE ^ Help*(context: Commands.Context); 
+BEGIN
+END grep.

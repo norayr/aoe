@@ -31,7 +31,7 @@ reject() {
         [ "$status" -eq 1 ] || { cat "$tmp/output" >&2; fail "exit $status: $*"; }
     fi
 }
-contains() { grep -Fq "$1" "$tmp/output" || { cat "$tmp/output" >&2; fail "missing output: $1"; }; }
+contains() { grep -Fq -- "$1" "$tmp/output" || { cat "$tmp/output" >&2; fail "missing output: $1"; }; }
 
 mkdir "$tmp/work"
 cp "$distribution/examples/Hello.Mod" "$tmp/work/Hello.Mod"
@@ -296,6 +296,94 @@ if grep -Fq should-not-run "$tmp/output"; then fail 'exit did not leave nested s
 run "$runner" System.Show 'literal|operator'
 contains 'literal|operator'
 echo 'PASS: pipes, redirection, background/wait, aliases, config, scripts and nested shells'
+
+printf 'Alpha\r\nbeta\nALPHA\romega' > grep-input.txt
+run "$runner" grep.Word -i alpha < grep-input.txt
+printf 'Alpha\nALPHA\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep literal case-insensitive stdin search failed'
+run "$runner" grep.Regex -vn '^ALPHA$' < grep-input.txt
+printf '1:Alpha\n2:beta\n4:omega\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep inverted numbered search or line endings failed'
+printf 'Shell.Copy < grep-input.txt | grep.Word -i alpha | grep.Regex -v "^ALPHA$"\n' > "$tmp/input"
+run "$runner" < "$tmp/input"
+printf 'Alpha\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'concurrent grep stages share state or fail to stream'
+run "$runner" grep.Word -n beta grep-input.txt
+printf 'grep-input.txt:2:beta\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep file search failed'
+run "$runner" grep.Word -l beta grep-input.txt
+printf 'grep-input.txt\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep matching filenames failed'
+cp grep-input.txt 'grep file.txt'
+run "$runner" grep.Word beta '"grep file.txt"'
+contains 'grep file.txt:beta'
+run "$runner" grep.Word beta '"grep-*.txt"'
+contains 'grep-input.txt:beta'
+run "$runner" grep.Word beta '"grep-?????.txt"'
+contains 'grep-input.txt:beta'
+run "$runner" grep.Word beta - < grep-input.txt
+printf 'beta\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep explicit stdin operand failed'
+run "$runner" grep.Word '""' < grep-input.txt
+printf 'Alpha\nbeta\nALPHA\nomega\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep empty literal pattern failed'
+printf '\nnonempty\r\n\rfinal' > grep-empty.txt
+run "$runner" grep.Regex '"^$"' < grep-empty.txt
+printf '\n\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep blank-line matching failed'
+printf '7\n123\na.b\nab\n-flag\n' > grep-regex.txt
+run "$runner" grep.Regex '"^[0-9]+$"' < grep-regex.txt
+printf '7\n123\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep repeated character classes failed'
+run "$runner" grep.Regex '"^a\.+b$"' < grep-regex.txt
+printf 'a.b\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep repeated escaped characters failed'
+run "$runner" grep.Regex '"^[^a-z-]+$"' < grep-regex.txt
+printf '7\n123\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep negated character classes failed'
+run "$runner" grep.Word -- -flag < grep-regex.txt
+contains '-flag'
+printf '^$[].*+?\\\n' > grep-literal.txt
+run "$runner" grep.Word '"^$[].*+?\"' < grep-literal.txt
+cmp grep-literal.txt "$tmp/output" || fail 'grep literal metacharacters failed'
+awk 'BEGIN { for (i=0;i<20000;i++) printf "x"; printf "needle\n" }' > grep-long.txt
+printf 'Shell.Copy < grep-long.txt | grep.Word needle | grep.Word -l needle\n' > "$tmp/input"
+run "$runner" < "$tmp/input"
+printf '(standard input)\n' > expected-grep.txt
+cmp expected-grep.txt "$tmp/output" || fail 'grep filenames-only pipeline failed to drain input'
+run "$runner" grep.Word needle < grep-long.txt
+cmp grep-long.txt "$tmp/output" || fail 'grep truncated a long line'
+reject "$runner" grep.Word absent < grep-input.txt
+[ ! -s "$tmp/output" ] || fail 'grep no-match result printed a diagnostic'
+reject "$runner" grep.Word '""' < /dev/null
+reject "$runner" grep.Word
+reject "$runner" grep.Word -z pattern
+reject "$runner" grep.Word beta missing-grep-file.txt
+contains 'grep: cannot open'
+reject "$runner" grep.Word beta '"missing-grep-*.txt"'
+contains 'grep: no files matched'
+reject "$runner" grep.Word beta .
+contains 'grep: is a directory'
+for expression in '[' '[a' '[]' '[^]' '*' 'a**' '[a]++' '\'; do
+    reject "$runner" grep.Regex "\"$expression\"" < grep-input.txt
+    contains 'grep: invalid pattern'
+done
+awk 'BEGIN { for (i=0;i<256;i++) printf "x" }' > grep-pattern.txt
+expression=$(cat grep-pattern.txt)
+reject "$runner" grep.Regex "$expression" < grep-input.txt
+contains 'grep: invalid pattern'
+printf 'ab\000cd\n' > grep-nul.txt
+reject "$runner" grep.Word ab < grep-nul.txt
+contains 'grep: NUL byte'
+printf 'grep.Word absent < grep-input.txt\nSystem.Show should-not-run\n' > "$tmp/input"
+reject "$runner" < "$tmp/input"
+if grep -Fq should-not-run "$tmp/output"; then fail 'grep no-match did not stop batch execution'; fi
+run "$runner" grep
+contains grep.Word
+contains grep.Regex
+run "$runner" regex
+[ ! -s "$tmp/output" ] || fail 'regex exports non-command procedures as commands'
+echo 'PASS: grep literal/regex filters, concurrent pipes, files/globs, options, long lines and errors'
 
 mkdir -p "$tmp/relocated tools/bin/amd64" "$tmp/relocated tools/obj"
 cp "$runner" "$tmp/relocated tools/bin/amd64/aoe"

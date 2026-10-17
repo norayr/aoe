@@ -12,6 +12,7 @@ CONST
 	Silent*= 2;
 
 	Ok* = 0;
+	NoMatch* = 1; (** Normal negative search result: nonzero, without an error message. *)
 	CommandNotFound* = 3901;
 	CommandError* = 3902;
 	CommandParseError* = 3903;
@@ -121,7 +122,9 @@ TYPE
 					commandProc(context);
 					context.out.Update; context.error.Update;
 					res := context.result;
-					IF res # Ok THEN msg := "Command not successful"; END;
+					IF res = NoMatch THEN msg := ""
+					ELSIF res # Ok THEN msg := "Command not successful"
+					END;
 				END;
 			END;
 		ELSE

@@ -5,6 +5,7 @@ CONST
 	InheritContext* = 1; 
 	Silent* = 2; 
 	Ok* = 0; 
+	NoMatch* = 1; 
 	CommandNotFound* = 3901; 
 	CommandError* = 3902; 
 	CommandParseError* = 3903; 

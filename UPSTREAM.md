@@ -12,3 +12,16 @@ desktop-free Linux x86-64 distribution. The original platform-specific source
 filenames and copyright notices are preserved. See `license.txt` and the
 individual source headers for licensing terms.
 
+## Console search tools from polpo
+
+`source/regex.Mod` and `source/grep.Mod` are adapted from
+`src/common/regex.Mod` and `src/cli/grep.Mod` in
+<https://github.com/polpo-system/polpo>, revision
+`30126a8ea71ca7100bd3d2d30be61ef0f9e5c8e8`. They are distributed under polpo's
+GNU GPL version 3, reproduced in `license-polpo.txt`; this does not replace
+the existing A2 source notices or `license.txt`.
+
+The adaptation uses A2 command streams and files instead of the Oberon desktop
+text system, keeps search state local to each invocation for concurrent pipes,
+handles Unix text line endings and growing line buffers, and fixes validation
+of repetitions following character classes and escaped characters.
