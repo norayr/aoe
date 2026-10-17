@@ -1,4 +1,5 @@
 MODULE Shell; (** Console shell, following polpo's loksh interaction model. *)
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 IMPORT SYSTEM, Machine, Unix, Modules, Commands, Streams, Strings, Files, CLIEnvironment, StdIO, ShellCommands, CommandInfo;
 

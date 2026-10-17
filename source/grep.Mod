@@ -1,4 +1,5 @@
 MODULE grep;
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 (** Adapted from polpo's src/cli/grep.Mod for aoe's Commands.Context streams. *)
 IMPORT Commands, Streams, Files, Strings, Unix, regex;

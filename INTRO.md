@@ -723,9 +723,3 @@ The first command recompiles the included sources and links the runner. The
 second checks the shell and tools and compares two freshly self-hosted
 generations. Our small commands are using the same compiler, module system and
 runtime that build the environment itself.
-
-## Connecting commands
-
-## Objects which do things
-
-## A few useful habits

@@ -1,5 +1,15 @@
 # Upstream provenance
 
+## aoe contributions
+
+Original aoe code, examples, build scripts and tests, and aoe's modifications
+to imported code, are licensed under `GPL-3.0-only`; see `LICENSE`. Upstream
+code retains its existing notices and license terms. Distributing the combined
+work under GPLv3 does not remove those notices or claim ownership of upstream
+contributions.
+
+## A2 sources
+
 The initial import contains 66 unmodified Active Oberon/A2 modules and
 `license.txt` from:
 

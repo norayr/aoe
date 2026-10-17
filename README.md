@@ -370,6 +370,20 @@ source compiler emits in textual symbol files. This difference settles after
 the first self-hosted generation; the checked-in binaries come from a
 self-hosted build. The tests do not modify the installed distribution.
 
+## License
+
+aoe's original code, examples, build scripts and tests, and our modifications
+to upstream code, are licensed under the GNU General Public License version 3
+only (`GPL-3.0-only`). The complete license is in [LICENSE](LICENSE).
+
+Existing third-party code retains its original copyright notices and license
+terms. In particular, the imported A2 sources retain the notices and terms in
+[license.txt](license.txt) and their source headers; the polpo grep adaptations
+are GPLv3, with their upstream license also preserved in
+[license-polpo.txt](license-polpo.txt). See [UPSTREAM.md](UPSTREAM.md) for provenance.
+The combined aoe distribution is distributed under GPLv3, with the applicable
+upstream notices retained.
+
 ## Dependencies and provenance
 
 The executable shell needs Linux ELF startup, glibc/libdl,

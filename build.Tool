@@ -1,4 +1,5 @@
 # Rebuild the Linux amd64 compiler, runtime and shell in place.
+# SPDX-License-Identifier: GPL-3.0-only
 # Run from the repository root: bin/amd64/aoe < build.Tool
 Compiler.Compile -p=Unix64 source/AMD64.Builtins.Mod
 Compiler.Compile -p=Unix64 source/Trace.Mod

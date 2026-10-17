@@ -1,4 +1,5 @@
 MODULE regex;
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 (** Small regular-expression engine from polpo's src/common/regex.Mod.
     Adapted for aoe: checked atom/repetition parsing and read-only arguments.

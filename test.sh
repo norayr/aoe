@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
 # Test the installation and two self-hosted generations.
 set -eu
 

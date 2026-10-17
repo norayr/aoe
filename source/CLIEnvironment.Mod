@@ -1,4 +1,5 @@
 MODULE CLIEnvironment; (** Linux console distribution search paths; no desktop initialization. *)
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 IMPORT SYSTEM, Unix, UnixFiles, Files, Streams, Commands, StdIO, Strings;
 

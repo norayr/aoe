@@ -1,4 +1,5 @@
 MODULE ShellCommands; (** Command execution, streams, aliases and scripts for the console shell. *)
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 IMPORT Commands, Modules, Streams, Strings, Files, Pipes, StdIO;
 

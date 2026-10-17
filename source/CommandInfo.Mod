@@ -1,4 +1,5 @@
 MODULE CommandInfo; (** Discover callable commands without loading their modules. *)
+(* SPDX-License-Identifier: GPL-3.0-only *)
 
 IMPORT SYSTEM, Machine, Modules, Commands, Streams, Strings, Files, ObjectFile, GenericLinker;
 
